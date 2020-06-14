@@ -1,0 +1,546 @@
+---
+title: "PEC2 Análisis de Datos Ómicos"
+author: "Francisco Abel Cedrón Santaeufemia"
+date: "11 de Junio de 2020"
+output: 
+    html_document:
+      toc: true
+      toc_float: false
+      theme: paper
+      number_sections: false
+      fig_caption: true
+    pdf_document:
+
+lang: es-ES
+---
+
+<style>
+body {
+   text-align: justify
+}
+
+code {
+  font-family: "Courier New", Courier, monospace;
+}
+
+blockquote {
+  border-left: 5px solid #ffc107;
+  font-size: 1em;
+}
+
+blockquote.info {
+  border-left: 5px solid #b5b5b5;
+}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+```{r paquetes, include=FALSE}
+setwd(".")
+
+if(!require("tools")) install.packages("tools")
+if(!require("dplyr")) install.packages("dplyr")
+if(!require("VennDiagram")) install.packages("VennDiagram")
+if(!require("RColorBrewer")) install.packages("RColorBrewer")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+if (!require("tweeDEseqCountData")) BiocManager::install("tweeDEseqCountData")
+if (!require("tweeDEseq")) BiocManager::install("tweeDEseq")
+if (!require("edgeR")) BiocManager::install("edgeR")
+if (!require("biomaRt")) BiocManager::install("biomaRt")
+if (!require("topGO")) BiocManager::install("topGO")
+
+library(tools)
+library(dplyr)
+library(VennDiagram)
+library(RColorBrewer)
+
+library(tweeDEseqCountData)
+library(tweeDEseq)
+library(edgeR)
+library(biomaRt)
+library(topGO)
+
+CUSTOM_SEED=20200611L
+
+BLUE_COLOR="#5fb5fc"
+ORANGE_COLOR="#ffa761"
+YELLOW_COLOR="#ffa825"
+RED_COLOR="#ec2927"
+GREEN_COLOR="#12943f"
+PURPLE_COLOR="#c557bc"
+```
+
+
+<blockquote class="info">
+**Repositorio:** https://github.com/fcedron-ouc/ADO_PEC2
+</blockquote>
+
+> **NOTA:** Aunque en el enunciado de la PEC pone que no se abuse de las salidas de R, la razón por la que quizás he puesto más de las indicadas es porque después de la PEC1 he visto que se me ha penalizado por no añadirlo y he decidido incluir más contenido esta vez, ya que a día de hoy sigo sin comprender como se evalúan las PEC.
+
+
+# Abstract
+
+RNA-Seq es la técnica que se emplea actualmente para el análisis de los niveles de expresión génica. RNA-seq se basa en la secuenciación del ARNm para posteriormente mapearlo en secuencias de referencia. Esta PEC tiene como estudio el análisis de la tiroides, donde se comparan tres tipos de inflitraciones:
+
+- NIT: Not inflitrated tissues
+- SFI: Small focal inflitrates
+- ELI: Extensive lymphoid inflitrates
+
+# Objetivos
+
+El objetivo de esta PEC se basa en realizar un proceso de análisis de datos de ultrasecuenciación mediante la realización de un estudio. Dicho estudio es el álisis de la inflamación de la tiroides a partir de 10 muestras aleatorias a partir de 3 tipos de datos diferentes. A partir de los datos seleccionados se llevarán a cabo una comparación con las tres combinaciones posibles, en búsqueda de los genes DE (diferencialmente expresados) y su análisis biológico. Además, se comprobará qué genes son destacables en las inflitraciones y si estos son responsables de las funciones tiroideas.
+
+# Materiales y métodos
+
+## Naturaleza de los datos
+
+Los datos empleados en esta PEC han sido proporcionados a través de un mensaje en el tablón y se corresponden con las muestras de un estudio obtenido del repositorio GTEx el cual tiene datos de expresión RNA-seq de un análisis tiroideo. El repositorio cuenta con datos de tres tipos de infiltraciones diferentes:
+
+- _Not inflitrated tissues (NIT): 236 samples_
+- _Small focal infiltrates (SFI): 42 samples_
+- _Extensive lymphoid inflitrates (ELI): 14 samples_
+
+Los datos con los que se ha de trabajar vienen proporcionados en dos archivos _csv_:
+
+- _counts.csv_ que contiene los datos de expresión de RNA-seq de todas las muestras para el estudio
+- _targets.csv_ que contiene la información para cada una de las muestras donde entre otras características está el tipo de infiltración.
+
+Empleando una semilla fija, cuyo valor es `r CUSTOM_SEED`, se permite que las ejecuciones sean siempre la misma ya que los números pseudo-aleatorios seran siempre los mismos. Con un valor fijo de semilla siempre se seleccionarán los mismos 10 datos para la realización de las comparaciones NIT-SFI, SFI-ELI y ELI-SFI que posteriormente permitiran la búsqueda de los genes diferencialmente expresados con los que comprobar si existe una significación biológica relacionada.
+
+## Métodos y herramientas
+
+De las dos herramientas que se podían realizar el trabajo se ha seleccionado el uso del lenguaje R (versión 3.6.3) con lo que apoya en CRAN y Bioconductor para los paquetes. Todo está corriendo en un RStudio Server (versión 1.3.959) que está emulado en un docker (versión 19.03.8) usando una base de macOS Catalina (versión 10.15.4). Para la realización del informe se ha empleado RMarkDown.
+
+Para el análisis del RNA-seq, las librerías que se han empleado han sido las de Bioconductor por su facilidad al tratar con datos biológicos.
+
+## Pasos seguidos
+
+Los pasos que se han seguido para la elaboración de este estudio están basados en el pipeline proporcionados en el enunciado de la PEC.
+
+### Preprocesado de los datos
+
+#### Extracción de las muestras
+
+El primer paso es la extracción de las muestras a partir de los datos que se encuentran en los archivos csv porporcionados.
+
+
+
+```{r}
+set.seed(CUSTOM_SEED)
+
+counts = read.csv("data/counts.csv", header=T, sep=";")
+target = read.csv("data/targets.csv", header=T, sep=",")
+
+# hay que seleccionar las secciones adecuadas dentro de target
+NIT <- subset(target, grepl("^(NIT)", target$Group))
+SFI <- subset(target, grepl("^(SFI)", target$Group))
+ELI <- subset(target, grepl("^(ELI)", target$Group))
+```
+
+
+
+Una vez están cargados los datos se seleccionan 10 muestras aleatorias de cada grupo y se extraen las secuencias correspondientes del fichero de counts.
+
+
+
+```{r}
+target_NIT_10 <- sample_n(NIT, 10)
+target_SFI_10 <- sample_n(SFI, 10)
+target_ELI_10 <- sample_n(ELI, 10)
+
+nit <- counts[, target_NIT_10$Sample_Name]
+sfi <- counts[, target_SFI_10$Sample_Name]
+eli <- counts[, target_ELI_10$Sample_Name]
+
+samples <- cbind(nit, sfi, eli)
+rownames(samples) <- counts[, 1]
+```
+
+
+
+Al final se tienen `r dim(samples)[1]` expresiones de genes y las `r dim(samples)[2]` columnas que se corresponden con las inflitraciones.
+
+
+
+#### Limpieza de datos
+
+Como buena práctica es recomendable examinar siempre si existen _NAs_ para saber que hacer con ellos. Por suerte, en la muestra seleccionada no existen datos con nulos asi que no hay que preocuparse por ellos.
+
+
+```{r, comment=""}
+table(is.na(samples))
+```
+
+
+También se analizan los _loci_ que no tengan un cierto valor para el análisis, así que se eliminan loque tengan de media un 0 por su escasa significancia.
+
+
+```{r, comment=""}
+mean_genes<-apply(samples, 1, mean)
+# boxplot(mean_genes)
+table(mean_genes == 0)
+```
+
+
+Se observa que hay `r table(mean_genes == 0)[2]` _loci_ con una media de cero lo que indica que no tienen apenas significancia para el análisis y que se pueden eliminar para evitar que existan alteraciones por el posible ruido que puedan causar. Después de este filtrado de datos se dispondrán de `r table(mean_genes == 0)[1]` exprexiones de genes.
+
+
+```{r, eval=FALSE, echo=FALSE, fig.width=3, fig.height=3}
+boxplot(mean_genes)
+```
+
+
+```{r}
+tmp<-samples[which(mean_genes == 0), ]
+i<-intersect(rownames(tmp), rownames(samples))
+samples<-samples[!rownames(samples)%in% i, ]
+# mean_genes_tmp<-apply(samples, 1, mean)
+# barplot(mean_genes_tmp, main = "Barplot de expresión", xlim=NULL, xlab="Genes", ylab="Frecuencia")
+```
+
+
+#### Normalización
+
+En la gráfica se puede ver que existen una serie de genes que están mucho más expresados que otros. Para poder observar los datos de una manera más clara se va a proceder a normalizarlos.
+
+
+```{r, echo=FALSE, fig.width=9, fig.height=4}
+barplot(apply(samples, 1, mean), main="Expresión después del filtrado", ylab="Frecuencia", xlab="Genes")
+```
+
+
+Para normalizarlos se emplea una técnica llamada _TMM_ ya que es una normalización que está diseñada específicamente para producción de ARN e intenta conservar las propiedades de las muestras que se analizarán, lo que ayuda a la comparación de la expresión de genes.
+
+
+```{r, message=FALSE}
+normalize_samples <- normalizeCounts(samples)
+```
+
+
+Con el uso de la función _maPlot_ se observa que al normalizar los datos con la función _normalizeCounts_ existe una variabilidad menor, lo que puede ayudar a realizar un mejor análisis.
+
+
+```{r, echo=FALSE, fig.width=9}
+maPlot(normalize_samples[, 1], normalize_samples[, 2], 
+       pch=16, cex=0.5, allCol=BLUE_COLOR, lowess=TRUE)
+grid(col="grey")
+title("TMM")
+```
+
+
+# Resultados y discusión
+
+## Comparación NIT-SFI
+
+El primer paso que se hace es el de crear un grupo con las infiltraciones de la comparación NIT y SFI seleccionando las muestras adecuadas del dataframe original. A continuación se aplica un refiltrado con la función _sweep_. El objetivo de hacer este refiltrado es que el gen tenga alguna presencia, para esto se va indicar que aparezca como mínimo 1 lectura por cada millón de veces que sea mapeado.
+
+
+```{r, comment="", warning=FALSE}
+comp_NIT_SFI <- normalize_samples[, 1:20]
+
+col_NIT_SFI <- rbind(target_NIT_10, target_SFI_10)
+group_NIT_SFI <- factor(col_NIT_SFI$Group)
+
+d <- calcNormFactors(DGEList(counts = comp_NIT_SFI, group=group_NIT_SFI))
+m <- sweep(d$counts, 2, 1e6 / d$samples$lib.size, "*")
+ridx_NIT_SFI <- rowSums(m>1) >= 2
+table(ridx_NIT_SFI)
+d <- d[ridx_NIT_SFI, ]
+```
+
+En el siguiente gráfico se muestra el diagrama de como es el escalamiento multidimensional de las muestras.
+
+```{r}
+plotMDS(d)
+```
+
+El siguiente paso es la ejecución del análisis diferencial con las funcionalidades que proporciona la librería _edgeR_. Aunque es recomendable usar las dispersiones que porporciona _tagwise_ ya que son más específicas, no se han utilizado porque al usarlo en las tres comparaciones no se encontraban genes diferencialmente expresados comunes. Por esta razón se ha usado las dispersiones _common_.
+
+```{r, comment=""}
+d_NIT_SFI <- estimateCommonDisp(d)
+dtag_NIT_SFI <- estimateTagwiseDisp(d_NIT_SFI)
+res.common_NIT_SFI  <- exactTest(d_NIT_SFI, pair=c("NIT", "SFI"), dispersion="common")
+res.tagwise_NIT_SFI <- exactTest(dtag_NIT_SFI, pair=c("NIT", "SFI"), dispersion="tagwise")
+
+# plotBCV(dtag_NIT_SFI, cex=0.4)
+
+dec_NIT_SFI <- decideTestsDGE(res.common_NIT_SFI, p=0.001, adjust="BH")
+dtag_NIT_SFI <- rownames(d_NIT_SFI)[as.logical(dec_NIT_SFI)]
+d_NIT_SFI_df <- as.data.frame(dec_NIT_SFI)
+d_NIT_SFI_df[, 2] <- rownames(res.common_NIT_SFI)
+up_NIT_SFI <- d_NIT_SFI_df[which(d_NIT_SFI_df$`SFI-NIT` == 1),]
+down_NIT_SFI <- d_NIT_SFI_df[which(d_NIT_SFI_df$`SFI-NIT` == -1),]
+summary(dec_NIT_SFI)
+genes_NIT_SFI <- c(up_NIT_SFI$V2, down_NIT_SFI$V2)
+```
+
+Por útimo, para calcular los genes diferencialmente expresados y saber cual de ellos están sobre-expresados e infra-expresados se emplea el test exacto de Fisher.
+
+```{r, echo=FALSE}
+plotSmear(res.common_NIT_SFI, de.tags=dtag_NIT_SFI)
+abline(h=c(-1, 1), col=BLUE_COLOR)
+# summary(decideTestsDGE(res.common_NIT_SFI ,p=0.001, adjust="BH"))
+# length(genes_NIT_SFI <- c(up_NIT_SFI$V2, down_NIT_SFI$V2))
+```
+
+El gráfico superior permite ver de una manera sencilla que genes están sobre-expresados y cuales infra-expresados. Concretemente se dispone de `r summary(decideTestsDGE(res.common_NIT_SFI, p=0.001, adjust="BH"))[3]` genes infra-expreados, `r summary(decideTestsDGE(res.common_NIT_SFI, p=0.001, adjust="BH"))[1]` genes sobre-expreados. El total es de `r length(genes_NIT_SFI <- c(up_NIT_SFI$V2, down_NIT_SFI$V2))`.
+
+## Comparación NIT-ELI
+
+El primer paso que se hace es el de crear un grupo con las infiltraciones de la comparación NIT y ELI seleccionando las muestras adecuadas del dataframe original. A continuación se aplica un refiltrado con la función _sweep_. El objetivo de hacer este refiltrado es que el gen tenga alguna presencia, para esto se va indicar que aparezca como mínimo 1 lectura por cada millón de veces que sea mapeado.
+
+
+```{r, comment="", warning=FALSE}
+comp_NIT_ELI <- cbind(normalize_samples[, 1:10], normalize_samples[, 21:30])
+
+
+col_NIT_ELI <- rbind(target_NIT_10, target_ELI_10)
+group_NIT_ELI <- factor(col_NIT_ELI$Group)
+
+d <- calcNormFactors(DGEList(counts = comp_NIT_ELI, group=group_NIT_ELI))
+m <- sweep(d$counts, 2, 1e6 / d$samples$lib.size, "*")
+ridx_NIT_ELI <- rowSums(m>1) >= 2
+```
+
+En el siguiente gráfico se muestra el diagrama de como es el escalamiento multidimensional de las muestras.
+
+```{r}
+plotMDS(d)
+```
+
+El siguiente paso es la ejecución del análisis diferencial con las funcionalidades que proporciona la librería _edgeR_. Aunque es recomendable usar las dispersiones que porporciona _tagwise_ ya que son más específicas, no se han utilizado porque al usarlo en las tres comparaciones no se encontraban genes diferencialmente expresados comunes. Por esta razón se ha usado las dispersiones _common_.
+
+```{r, comment=""}
+table(ridx_NIT_ELI)
+d <- d[ridx_NIT_ELI, ]
+d_NIT_ELI <- estimateCommonDisp(d)
+dtag_NIT_ELI <- estimateTagwiseDisp(d_NIT_ELI)
+res.common_NIT_ELI  <- exactTest(d_NIT_ELI, pair=c("NIT", "ELI"), dispersion="common")
+res.tagwise_NIT_ELI <- exactTest(dtag_NIT_ELI, pair=c("NIT", "ELI"), dispersion="tagwise")
+
+# plotBCV(dtag_NIT_ELI, cex=0.4)
+
+dec_NIT_ELI <- decideTestsDGE(res.common_NIT_ELI, p=0.001, adjust="BH")
+dtag_NIT_ELI <- rownames(d_NIT_ELI)[as.logical(dec_NIT_ELI)]
+d_NIT_ELI_df <- as.data.frame(dec_NIT_ELI)
+d_NIT_ELI_df[,2] <- rownames(res.common_NIT_ELI)
+up_NIT_ELI <- d_NIT_ELI_df[which(d_NIT_ELI_df$`ELI-NIT` == 1),]
+down_NIT_ELI <- d_NIT_ELI_df[which(d_NIT_ELI_df$`ELI-NIT` == -1),]
+summary(dec_NIT_ELI)
+genes_NIT_ELI <- c(up_NIT_ELI$V2, down_NIT_ELI$V2)
+```
+
+Por útimo, para calcular los genes diferencialmente expresados y saber cual de ellos están sobre-expresados e infra-expresados se emplea el test exacto de Fisher.
+
+```{r, echo=FALSE}
+plotSmear(res.common_NIT_ELI, de.tags=dtag_NIT_ELI)
+abline(h=c(-1, 1), col=BLUE_COLOR)
+#summary(decideTestsDGE(res.common_NIT_ELI, p=0.001, adjust="BH"))
+#length(genes_NIT_ELI <- c(up_NIT_ELI$V2, down_NIT_ELI$V2))
+```
+
+El gráfico superior permite ver de una manera sencilla que genes están sobre-expresados y cuales infra-expresados. Concretemente se dispone de `r summary(decideTestsDGE(res.common_NIT_ELI, p=0.001, adjust="BH"))[3]` genes infra-expreados, `r summary(decideTestsDGE(res.common_NIT_ELI, p=0.001, adjust="BH"))[1]` genes sobre-expreados. El total es de `r length(genes_NIT_ELI <- c(up_NIT_ELI$V2, down_NIT_ELI$V2))`.
+
+## Comparación SFI_ELI
+
+El primer paso que se hace es el de crear un grupo con las infiltraciones de la comparación SFI y ELI seleccionando las muestras adecuadas del dataframe original. A continuación se aplica un refiltrado con la función _sweep_. El objetivo de hacer este refiltrado es que el gen tenga alguna presencia, para esto se va indicar que aparezca como mínimo 1 lectura por cada millón de veces que sea mapeado.
+
+
+```{r, comment="", warning=FALSE}
+comp_SFI_ELI <- normalize_samples[, 11:30]
+
+
+col_SFI_ELI <- rbind(target_SFI_10, target_ELI_10)
+group_SFI_ELI <- factor(col_SFI_ELI$Group)
+
+d <- calcNormFactors(DGEList(counts = comp_SFI_ELI, group=group_SFI_ELI))
+m <- sweep(d$counts, 2, 1e6 / d$samples$lib.size, "*")
+ridx_SFI_ELI <- rowSums(m>1) >= 2
+table(ridx_SFI_ELI)
+d <- d[ridx_SFI_ELI,]
+```
+
+En el siguiente gráfico se muestra el diagrama de como es el escalamiento multidimensional de las muestras.
+
+```{r}
+plotMDS(d)
+```
+
+El siguiente paso es la ejecución del análisis diferencial con las funcionalidades que proporciona la librería _edgeR_. Aunque es recomendable usar las dispersiones que porporciona _tagwise_ ya que son más específicas, no se han utilizado porque al usarlo en las tres comparaciones no se encontraban genes diferencialmente expresados comunes. Por esta razón se ha usado las dispersiones _common_.
+
+```{r, comment=""}
+d_SFI_ELI <- estimateCommonDisp(d)
+dtag_SFI_ELI <- estimateTagwiseDisp(d_SFI_ELI)
+res.common_SFI_ELI  <- exactTest(d_SFI_ELI, pair=c("SFI", "ELI"), dispersion="common")
+res.tagwise_SFI_ELI <- exactTest(dtag_SFI_ELI, pair=c("SFI", "ELI"), dispersion="tagwise")
+
+# plotBCV(dtag_SFI_ELI, cex=0.4)
+
+dec_SFI_ELI <- decideTestsDGE(res.common_SFI_ELI, p=0.001, adjust="BH")
+dtag_SFI_ELI <- rownames(d_SFI_ELI)[as.logical(dec_SFI_ELI)]
+d_SFI_ELI_df <- as.data.frame(dec_SFI_ELI)
+d_SFI_ELI_df[,2] <- rownames(res.common_SFI_ELI)
+up_SFI_ELI <- d_SFI_ELI_df[which(d_SFI_ELI_df$`ELI-SFI` == 1),]
+down_SFI_ELI <- d_SFI_ELI_df[which(d_SFI_ELI_df$`ELI-SFI` == -1),]
+summary(dec_SFI_ELI)
+genes_SFI_ELI <- c(up_SFI_ELI$V2,down_SFI_ELI$V2)
+```
+
+Por útimo, para calcular los genes diferencialmente expresados y saber cual de ellos están sobre-expresados e infra-expresados se emplea el test exacto de Fisher.
+
+```{r, echo=FALSE}
+plotSmear(res.common_SFI_ELI, de.tags = dtag_SFI_ELI)
+abline(h=c(-1,1), col=BLUE_COLOR)
+#summary(decideTestsDGE(res.common_SFI_ELI, p=0.001, adjust="BH"))
+#length(genes_SFI_ELI <- c(up_SFI_ELI$V2, down_SFI_ELI$V2))
+```
+
+El gráfico superior permite ver de una manera sencilla que genes están sobre-expresados y cuales infra-expresados. Concretemente se dispone de `r summary(decideTestsDGE(res.common_SFI_ELI, p=0.001, adjust="BH"))[3]` genes infra-expreados, `r summary(decideTestsDGE(res.common_SFI_ELI,p=0.001, adjust="BH"))[1]` genes sobre-expreados. El total es de `r length(genes_SFI_ELI <- c(up_SFI_ELI$V2, down_SFI_ELI$V2))`.
+
+
+## Comparación conjunta
+
+
+```{r, fig.width=8, fig.height=6}
+commons <- intersect(intersect(genes_NIT_SFI, genes_NIT_ELI), genes_SFI_ELI)
+# length(commons)
+# up and down se calculan para comprobar después su anotación
+up<-intersect(intersect(up_NIT_SFI$V2, up_NIT_ELI$V2), up_SFI_ELI$V2)
+down<-intersect(intersect(down_NIT_SFI$V2, down_NIT_ELI$V2), down_SFI_ELI$V2)
+
+vennDiagramColors <- c(BLUE_COLOR, RED_COLOR, YELLOW_COLOR)
+vennPlot <- venn.diagram(x=list(genes_NIT_SFI, genes_SFI_ELI, genes_NIT_ELI), 
+                   category.names = c("NIT vs SFI", "SFI vs ELI", "NIT vs ELI"),
+                   filename=NULL,
+                   main="Comparación de genes diferencialmente expresados",
+                   main.fontface="bold", main.cex=1.25,
+                   col=vennDiagramColors, fill=vennDiagramColors, 
+                   fontfamily="sans", fontface="bold", cex=1.15,
+                   cat.col=vennDiagramColors, cat.fontfamily="sans", cat.cex=1,
+                   cat.default.pos="outer", cat.pos=c(-30, 30, 120),
+                   cat.dist=c(0.055, 0.055, 0.085), rotation=1,
+                   lwd=0.75, alpha=0.25)
+grid.draw(vennPlot)
+```
+
+El gráfico está indicando que en la intersección existen `r length(commons)` genes diferencialmente expresados.
+
+## Anotación de los genes
+
+La librería _biomaRt_ es la que se ha empleado para la anotación de los genes diferencialmente expresados.
+
+```{r, message=FALSE, warning=FALSE}
+mart <- useMart(biomart="ensembl", dataset="hsapiens_gene_ensembl")
+
+genes_commons<-getBM(attributes=c("hgnc_symbol"),
+                     filters="ensembl_gene_id_version", 
+                     values=commons, mart=mart)
+genes_commons <- genes_commons[, 1]
+# genes_commons
+ups <- getBM(attributes=c("hgnc_symbol", "description"), 
+           filters="ensembl_gene_id_version", 
+           values=up, mart=mart)
+# ups
+downs <- getBM(attributes=c("hgnc_symbol","description"), 
+             filters="ensembl_gene_id_version", 
+             values=down, mart=mart)
+# downs
+```
+
+```{r}
+genes_commons
+ups
+down
+```
+
+## Significación biológica
+
+La librería que se ha empleado para el análisis de significación biológica ha sido _topGO_. Para ello se ha creado un objeto del tipo topGO con los `r length(commons)` genes diferencialmente expresados.
+
+```{r, message=FALSE, warning=FALSE}
+total_genes <- getBM(attributes=c("hgnc_symbol", "go_id"), 
+                     filters="ensembl_gene_id_version",
+                     values=rownames(samples), mart=mart)
+
+#head(total_genes, 10)
+tmp <- which(total_genes$go_id == "")
+total_genes <- total_genes[-tmp, ]
+
+# se necesita convertir en lista para poder calcular el objeto topGo
+lista <- list()
+for (i in unique(total_genes$hgnc_symbol)) {
+  lista[[i]] = total_genes[which(total_genes$hgnc_symbol == i),]$go_id
+}
+# head(lista, 10)
+
+gen <- names(lista)
+comparative_gene <- factor(as.integer(gen %in% genes_commons))
+```
+
+```{r, include=FALSE, comment=""}
+table(comparative_gene)
+```
+
+```{r, comment=""}
+names(comparative_gene) <- gen
+
+GO_data <- new("topGOdata", ontology="BP", allGenes=comparative_gene, annot=annFUN.gene2GO, gene2GO=lista)
+```
+
+La prueba de _Fisher_ se ha empleado para obtener las anotaciones GO asociadas que indica que son significativas.
+
+```{r, comment="", message=FALSE}
+fisher_test = runTest(GO_data, algorithm="classic", statistic="fisher")
+```
+
+```{r, comment=""}
+fisher_test
+```
+
+De las `r length(fisher_test@score)` anotaciones de Go totales, `r fisher_test@geneData[1]` de `r fisher_test@geneData[2]` genes diferencialmente expresados fueron analizados. De todos esto, `r sum(score(fisher_test) <= 0.01)` obtienen un p valor inferior a 0.01.
+
+# Conclusión
+
+La mejor forma de obtener alguna interpretación biológica es usando un gráfico del enrequicimiento realizado en la significación biológica. El siguiente gráfico representa las anotaciones significativamente más importantes.
+
+```{r, fig.width=9, fig.height=7}
+nodes = sum(score(fisher_test) <= 0.01)
+allRes = GenTable(GO_data, classicFisher=fisher_test, topNodes=nodes)
+# head(allRes)
+
+layout(t(1:2), widths=c(8, 1))
+par(mar=c(4, 0.5, 0.7, 0.7), oma=c(2, 15, 2, 4), las=1)
+
+rgb_pal = colorRampPalette(c("#fde725", "#55c667", "#39568c","#440154"))
+
+p_value = as.numeric(gsub("<", "", allRes$classicFisher))
+max_value = as.integer(max(-log(p_value))) + 1
+min_value = 1
+p_v_range = exp(-seq(max_value, 0, -1))
+allRes$Color = rgb_pal(max_value) [cut(p_value, p_v_range)]
+
+ord = order(allRes$Significant, decreasing = T)
+barplot(allRes$Significant[ord], names.arg=allRes$Term[ord], las=2, horiz=T, 
+        col=allRes$Color[ord], xlab="Número de secuencias", 
+        main="Enrequicimiento")
+
+image(0, seq(min_value, max_value), t(seq_along(seq(min_value, max_value))), 
+      col=rev(rgb_pal(max_value)), axes=F, ann=F)
+
+p_v_label = formatC(exp(-seq(log(min_value), -log(min(p_value)), l=9)), format="e", digits=1)
+axis(4, at=seq(min_value, max_value, length=9), labels=p_v_label)
+title("p-value", cex.main=0.9)
+```
+
+Como se puede  ver, todas las funciones más importantes relacionadas con GO estarán relacionadas con funciones que obviamente están relacionadas con la tiroides, lo que se espera porque son muestras del mismo tejido. A pesar de los diferentes métodos de infiltración, las tres recolectarán la expresión de RNA-seq, y sus anotaciones biológicas estarán relacionadas con la tiroides y el sistema inmune.
+
+Las `r sum(score(fisher_test) <= 0.01)` anotaciones más importantes se muestran a continuación:
+```{r, echo=FALSE, comment=""}
+allRes$Term[]
+```
